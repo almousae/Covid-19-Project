@@ -1,7 +1,6 @@
 ---
 title: "Investigating COVID-19 Death Rates"
-author: "Brenden Paddock, Esmma Almousa, Richard Ren and Tanner Sterling"
-date: "4/26/2021"
+author: "Esmma Almousa, Brenden Paddock, Richard Ren and Tanner Sterling"
 output: html_document
 ---
 ## Introduction
