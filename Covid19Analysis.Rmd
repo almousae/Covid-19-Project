@@ -46,19 +46,17 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(gridExtra)
 library(lubridate)
-source("../../scripts/viridis.R")
-source("../../scripts/ggprob.R")
 ```
 
 ```{r, include=FALSE}
-CA_Covid <- read.csv("../../data/CA_Covid.csv")%>%
+CA_Covid <- read.csv("CA_Covid.csv")%>%
   filter(area != "Out of state", area != "Unknown", area_type == "County") %>%
   select(area, cases, deaths)%>%
   group_by(area) %>%
   summarise(cases = sum(cases), deaths = sum(deaths), death_rate = deaths/cases)%>%
   rename("County" = area)
   
-Census <- read.csv("../../data/County_Census_2017.csv") %>%
+Census <- read.csv("County_Census_2017.csv") %>%
   filter(State == "California") %>%
   drop_na()%>%
   select(County, TotalPop, Men, Women, Hispanic, White, Black, Native, Asian, Pacific, Poverty, Employed, Unemployment) %>%
@@ -71,7 +69,7 @@ CA <- full_join(Census, CA_Covid, by = "County")
 
 ca_pop = sum(Census$Pop)
 
-demo <- read.csv("../../data/covid19casesdemographics.csv") %>%
+demo <- read.csv("covid19casesdemographics.csv") %>%
   drop_na() %>%
   filter(demographic_category == "Race Ethnicity") %>%
   select(-demographic_category, -percent_cases, -percent_deaths) %>%
