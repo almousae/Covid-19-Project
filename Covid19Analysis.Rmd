@@ -1,0 +1,275 @@
+---
+title: "Investigating COVID-19 Death Rates"
+author: "Brenden Paddock, Esmma Almousa, Richard Ren and Tanner Sterling"
+date: "4/26/2021"
+output: html_document
+---
+## Introduction
+
+  In the middle of a global pandemic there are several unanswered questions.  How did we get here? When will this end? There are more quantitative questions: Do lockdowns work? Does better testing yield safer lives? Our question we analyzed: How are COVID-19 death rates different for different people? Though COVID-19 does not effect different race differently physically, there are likely to be many externalities that cause disparities between races.
+
+
+## Background
+
+  Our first data set, titled **CA_Covid**, was collected from the California Health and Human Services Open data Portal located at https://data.chhs.ca.gov/. This dataset provides California’s state data and out of state data related to COVID-19 beginning from the date 2020-01-01 and ending date of 2021-03-29. This data set incorporates multiple variables, but the variables that were incorporated into our project from this include the following:
+
+  **Area**: This variable identifies whether the row in this dataset is identified from an area “Out of State”,        “Unknown” or identifies the name of the California county if the data is from in state. <br /> 
+  **Cases**: This variable portrays the number of cases identified in this county. <br />
+  **Deaths**: This variable portrays the number of deaths identified in this county. <br />
+  
+  The first step we will take to clean this dataset is filter out any areas that are identified as “Unknown” or “Out of State” since we wish to focus on California county data only. Next, we plan to group this data by area and summarize the data by having cases equal to the sum of all cases for this county, and deaths equal to the sum of all deaths in this county. We will then create our own variable called **death_rate** which will be the quotient of **deaths**/**cases**.
+  
+  Our second dataset, titled **County_Census_2017**, was collected from the United States Census Bureau located at https://www.census.gov/. This dataset provides data for multiple states and counties regarding the number of men, women, unemployed individuals, individuals in poverty, and number of individuals within specific races as well as the overall population of the county. The following variables were incorporated into our dataset: <br /> <br />
+  **State**: Represents the state which the data is from <br />
+  **County**: Represents the county which the data is from <br />
+  **Population**: Represents the total population of the county <br />
+  **Men**: Represents the number of men in the county <br />
+  **Women**: Represents the number of women in the county <br />
+  **Hispanic**: Represents the number of Hispanic individuals in the county <br />
+  **White**: Represents the number of White individuals in the county <br />
+  **Black**: Represents the number of Black individuals in the county <br />
+  **Native**: Represents the number of Native American individuals in the county <br />
+  **Asian**: Represents the number of Asian individuals in the county <br />
+  **Pacific**:  Represents the number of Pacific Islander individuals in the county <br />
+  **Poverty**: Represents the number of individuals in poverty in the county <br />
+  **Unemployment**: Represents the number of unemployed individuals in the county <br />
+  
+  We plan to only filter out counties from the state of California since we are focused on analysis in this state. We will then convert our variables (excluding population) to percentages by dividing each variable by 100. 
+We will then use full_join to join the two datasets together by county. 
+
+  Another data set **covid19casesdemographics.csv** was also collected from the California Health and Human Services Open data Portal located at https://data.chhs.ca.gov/. In this data set, each row shows total number of cases at a specific date and its percent of CA population. We only obtained the values of those whose race is in this set: (American Indian or Alaska Native, Asian, Black, Latino, Multi-Race, Native Hawaiian and other Pacific Islander, White). We saved the latest values by slicing the nearest date. We got the total population of CA from the Census data set and times the percent of CA population of each race to figure out the exact number of each race in CA. We divided the number of COVID cases by the total number of that race to get an estimated value for getting COVID for every race. This data will be used to conduct a Likelihood Ratio Test for contracting COVID-19 among different races.
+
+  Our question of focus for this analysis will be: **How does the death rate of COVID-19 differ among different races and socioeconomic backgrounds?**
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(gridExtra)
+library(lubridate)
+source("../../scripts/viridis.R")
+source("../../scripts/ggprob.R")
+```
+
+```{r, include=FALSE}
+CA_Covid <- read.csv("../../data/CA_Covid.csv")%>%
+  filter(area != "Out of state", area != "Unknown", area_type == "County") %>%
+  select(area, cases, deaths)%>%
+  group_by(area) %>%
+  summarise(cases = sum(cases), deaths = sum(deaths), death_rate = deaths/cases)%>%
+  rename("County" = area)
+  
+Census <- read.csv("../../data/County_Census_2017.csv") %>%
+  filter(State == "California") %>%
+  drop_na()%>%
+  select(County, TotalPop, Men, Women, Hispanic, White, Black, Native, Asian, Pacific, Poverty, Employed, Unemployment) %>%
+  mutate(Hispanic = Hispanic*TotalPop/100, White = White*TotalPop/100, Black = Black*TotalPop/100, Native = Native*TotalPop/100, Asian = Asian*TotalPop/100, Pacific= Pacific*TotalPop/100, Poverty = Poverty*TotalPop/100, Unemployment= Unemployment*TotalPop/100) %>%
+  group_by(County) %>%
+  summarise(Pop = sum(TotalPop), Men = sum(Men)/Pop, Women = sum(Women)/Pop, Hispanic = sum(Hispanic)/Pop, White = sum(White)/Pop, Black = sum(Black)/Pop, Native = sum(Native)/Pop, Asian = sum(Asian)/Pop, Pacific = sum(Pacific)/Pop, Poverty = sum(Poverty)/Pop, Unemployment = sum(Unemployment)/Pop) %>%
+  mutate(County = str_remove(County, " County"))
+
+CA <- full_join(Census, CA_Covid, by = "County")
+
+ca_pop = sum(Census$Pop)
+
+demo <- read.csv("../../data/covid19casesdemographics.csv") %>%
+  drop_na() %>%
+  filter(demographic_category == "Race Ethnicity") %>%
+  select(-demographic_category, -percent_cases, -percent_deaths) %>%
+  mutate(report_date = ymd(report_date)) %>%
+  group_by(demographic_value) %>%
+  filter(demographic_value != "Other") %>%
+  filter(demographic_value != "Total") %>%
+  slice_max(report_date) %>%
+  mutate(pop_in_ca = round((percent_of_ca_population /100) * ca_pop))
+
+
+ca_pop_race_available = sum(demo$pop_in_ca)
+demo <- demo %>%
+  select(demographic_value, total_cases, pop_in_ca)
+demo
+```
+
+## Analysis
+
+### Likelihood Ratio Test
+
+- We want to consider a hypothesis test to see if the probabilities are not all the same for different racial groups.  We write out the test like this:
+
+$$
+H_0: p_1 = \ldots = p_7 \\
+H_a: \text{not}~ p_1 = \ldots = p_7
+$$
+
+- $p_1$ representing "American Indian or Alaska Native", $p_2$ representing "Asian" etc.
+- The null hypothesis is that all of the probabilities of getting COVID are the same for each racial group.
+- The alternative hypothesis is that they are not all the same (at least one is different).
+
+```{r, echo=FALSE}
+## p_hat for each race
+demo1 <- demo %>%
+  mutate(p_hat = total_cases / pop_in_ca)
+```
+
+```{r, echo=FALSE}
+demo1_0 <- demo %>%
+  ungroup()%>%
+  summarise(total_cases = sum(total_cases), 
+            total_pop = sum(pop_in_ca),
+            p_0 = total_cases / total_pop)
+
+p_0 <- demo1_0$p_0
+
+demo1 <- demo1 %>%
+  mutate(p_0 = p_0) %>%
+  mutate(log_L0 = dbinom(total_cases, pop_in_ca, p_0, log=TRUE),
+         log_L1 = dbinom(total_cases, pop_in_ca, p_hat, log=TRUE))
+
+lrt <- demo1 %>%
+  ungroup() %>%
+  summarize(log_L0 = sum(log_L0),
+            log_L1 = sum(log_L1),
+            lrt = 2 * (log_L1 - log_L0),
+            R = exp(log_L0-log_L1))
+lrt
+```
+
+- There are 7 different races in the data set, so degrees of freedom = 7 - 1 = 6.
+
+```{r, echo=FALSE}
+lrt <- lrt %>%
+  mutate(p_value = 1 - pchisq(lrt,6))
+lrt
+```
+
+- The p-value is 0. We reject the null hypothesis. We have evidence that the probability of getting COVID for people of different races are not the same.
+
+### Different Races vs COVID-19 Death Rate, By County in California
+
+
+```{r echo=FALSE}
+plot1 <- CA %>%
+  group_by(County) %>%
+  ggplot(aes(x=White, y = death_rate)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x, se = FALSE)  +
+  xlab("Percent of Population") +
+  ylab("Death Rate") +
+  ggtitle("White Population")
+
+plot2 <- CA %>%
+  group_by(County) %>%
+  ggplot(aes(x=Black, y = death_rate)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x, se = FALSE)  +
+  xlab("Percent of Population") +
+  ylab("Death Rate") +
+  ggtitle("Black Population")
+
+plot3 <- CA %>%
+  group_by(County) %>%
+  ggplot(aes(x=Hispanic, y = death_rate)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x, se = FALSE)  +
+  xlab("Percent of Population") +
+  ylab("Death Rate") +
+  ggtitle("Hispanic Population")
+
+
+plot4 <- CA %>%
+  group_by(County) %>%
+  ggplot(aes(x=Asian, y = death_rate)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ x, se = FALSE)  +
+  xlab("Percent of Population") +
+  ylab("Death Rate") +
+  ggtitle("Asian Population")
+
+grid.arrange(plot1,plot2,plot3,plot4)
+
+
+```
+
+The first set of linear regression graphs show the relationship between the percent of population of the race specified and the Death Rate of COVID-19. These sets of graphs help us answer our question in finding how COVID affects different races for each county in California. There seems to be a negative, linear trend for COVID death rates as the percentage of the population being white in the county increases. The relationship for COVID death rates seems to rise slightly while the percentage of the county population being black rises. The bottom two sets of graphs show as the percentage of Hispanic and Asian population increases, so does the COVID Death Rate.
+
+
+### Unemployment and Poverty Affect on COVID-19 Death Rate, with Race
+
+```{r, echo=FALSE}
+
+plot5 <- CA %>%
+  group_by(County) %>%
+  ggplot(aes(x=Unemployment, y = death_rate)) +
+  geom_point(aes(size = Poverty, color = White )) +
+  geom_smooth(method = lm, formula = y ~ x, se = FALSE)  +
+  xlab("Unemployed Population") +
+  ylab("Death Rate") +
+  theme(legend.box = "horizontal")
+
+
+plot6 <- CA %>%
+  group_by(County) %>%
+  ggplot(aes(x=Unemployment, y = death_rate)) +
+  geom_point(aes(size = Poverty, color = Hispanic )) +
+  geom_smooth(method = lm, formula = y ~ x, se = FALSE)  +
+  xlab("Unemployed Population") +
+  ylab("Death Rate") +
+  theme(legend.box = "horizontal")
+
+
+grid.arrange(plot5, plot6)
+
+```
+
+
+The second set of linear regression graphs show the relationship between unemployment rate and COVID-19 Death Rate. There is a slight increase in COVID-19 death rates as unemployment increases. The poverty percentage also increases as the unemployment rate increases, with a higher hispanic percentage of population being to the center and right. There is a high percentage of white population towards the lower ends of the unemployment rate as well. 
+
+
+
+## Interpretation
+
+### Likelihood Ratio Test
+
+- The likelihood ratio test was done in order to determine whether statistically significant that the chance of contracting COVID is the same for each race.
+
+- Our statistic is $G = -2 (\ln L_0 - \ln L_1) = 2(\ln L_1 - \ln L_0)$.
+
+- We compared our test statistic to a chi-square distribution with 6 degrees of freedom, since there are 7 difference races included in the data set. The p-value turns out to be exactly 0. We have evidence to conclude that race is an important factor which affects the chance of contracting COVID.
+
+### Different Races vs COVID-19 Death Rate
+
+- Four graphs were generated displaying race vs death rate. These graphs answer how different races can be affect by COVID-19.
+
+- The graphs were all fit with a linear fit line which shows the trend of data. From this line we can tell that different races do face different COVID-19 rates.
+
+- The graph of the White population shows a negative correlation with death rate, where as the graphs of Black, Hispanic and Asian population all show a positive correlation with death rate. 
+
+- We have determined that there is a difference in COVID-19 death rates between races, but there are still questions about what fuels this disparity. 
+
+### Unemployment and Poverty Affect on COVID-19 Death Rate
+
+- Two more graphs were generated to investigate what affect unemployment and poverty have on COVID-19 death rate. These graphs also display the White and Hispanic populations.
+
+- Looking at the linear fit line there is a small positive correlation between Unemployment and Death Rate. 
+
+- The size of the points represents the percentage of the population in poverty. Looking at the graphs most of the larger dots are higher on the plot representing a higher death rate.
+
+- Using the color of the dots it can be determined that the counties with more White population tend to have less poverty and unemployment.  Conversely, counties with higher Hispanic population have higher poverty and unemployment rates.
+
+- There seems to be some positive correlation between unemployment, poverty and COVID-19 death rates. This leads to more questions: Why do different races live in different employment and financial situations? Is there a way to shrink this inequality to prevent the differences in death rate for some new pandemic?
+
+## Conclusion
+
+We can connect our analysis to our research question by interpreting results from our graphs and likelihood test. When comparing the slopes of the graphs from the “Different Races vs COVID-19 Death Rate, By County in California” section of our file, it is clear that the graph for White Population is significantly different than the graphs for the Black Population,Hispanic Population, and Asian Population. The White Population graph is different from the others because it has a negative slope, and this was the only graph that demonstrated that as the population increased, the death rate decreased. This is an important finding as it raises different questions on why the results for the White population are so much different than the findings for the other race populations. Future directions from this finding could be comparing the effects of different viruses on different races to see if these viruses also correlate to lower death rates among White Populations. This would then raise more questions such as: How are White Populations treated differently in hospital settings when infected with a virus compared to other race populations? This could be determined by collecting data from hospitals regarding treatment towards patients based on their race.<br />
+
+A different way to analyze our data is looking at an exponential model of our data instead of a linear model to infer if there is an exponential relationship between the variables instead. We would also be interested in creating box plots to demonstrate death rates for different races, in order to identify any significant outliers as well as quartiles within the data. <br />
+
+Our hypothesis test shows that the p-value is 0, meaning we can reject the null hypothesis since it is below .05, demonstrating that the probability of getting COVID-19 for people of different races are not the same. This raises other questions such as: is there significant evidence that the probability of getting COVID-19 is different among different ages? <br />
+
+However, it is important to recognize that we cannot come to a strict conclusion on our findings as it is important to recognize confounding factors that may have influenced the results. Factors such as the individual's age, location, and current status in health could have played a role in the linear regression results. Future questions could also include, How does the death rate of covid-19 differ among different ages? It is important to remember that there could be many shortcomings in our analysis since other personal factors of each individual were not taken into consideration. <br />
+
+In terms of our “Unemployment and Poverty Affect on COVID-19 Death Rate, with Race” section of our html, we compared the White Population and Hispanic Population for this section since the slopes for these two linear regression models from the previous graphs were the most different. It is demonstrated by these graphs that as the unemployed population increases, the level of poverty also increases. This is shown by the points progressively becoming larger as the unemployment population increases. Additionally, there is a positive slope within these two graphs, meaning that as the unemployment population increases and poverty level increases, the death rate among the populations also increases. It is also important to recognize confounding variables that may be affecting the results, including age, health status, and location. Possible future questions from this finding include: How are individuals in poverty treated differently in hospital settings? We could collect data on hospitals in impoverished areas and compare it to hospitals in areas that are surrounded with less people in poverty. <br />
+
+We set out to answer the quetions: **How does the death rate of COVID-19 differ among different races and socioeconomic backgrounds?**.  We have come to the conclusion that differnt races contract COVID-19 at different rates, different races have drasticly different death rates from COVID-19, and Unemployment and Poverty have some noticiable influence on COVID-19 death rates.
+
+
