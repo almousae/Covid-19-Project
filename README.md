@@ -8,3 +8,5 @@ https://data.chhs.ca.gov/dataset/covid-19-time-series-metrics-by-county-and-stat
 https://www.census.gov
 ### California State Health and Human Services Department Covid-19 Data
 https://data.chhs.ca.gov/
+###Authors
+Esmma Almousa, Brenden Paddock, Richard Ren and Tanner Sterling
